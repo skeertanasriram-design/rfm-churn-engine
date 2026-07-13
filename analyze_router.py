@@ -158,13 +158,32 @@ async def analyze_dataset(
 
     detected = detect_columns(df)
 
-    # Manual overrides from the frontend, if supplied
-    if customer_id_col:
-        detected["customer_id"] = customer_id_col
-    if order_date_col:
-        detected["order_date"] = order_date_col
-    if order_value_col:
-        detected["order_value"] = order_value_col
+    # Manual overrides from the frontend, if supplied.
+    # Treat blank strings the same as "not provided" (Swagger/forms sometimes
+    # send "" instead of omitting the field), and validate that any override
+    # actually names a real column in the uploaded file.
+    overrides = {
+        "customer_id": customer_id_col,
+        "order_date": order_date_col,
+        "order_value": order_value_col,
+    }
+    invalid_overrides = []
+    for field, override in overrides.items():
+        if override and override.strip():
+            if override in df.columns:
+                detected[field] = override
+            else:
+                invalid_overrides.append({"field": field, "given": override})
+
+    if invalid_overrides:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "One or more column overrides don't match any column in the uploaded file.",
+                "invalid_overrides": invalid_overrides,
+                "available_columns": list(df.columns),
+            },
+        )
 
     missing = [f for f, col in detected.items() if col is None]
     if missing:
